@@ -1,0 +1,16 @@
+# Core
+streamlit>=1.38
+requests>=2.32
+python-dotenv>=1.0
+sqlite-utils>=3.37
+
+# Media processing
+ffmpeg-python>=0.2.0
+
+# VerbX SDK / HTTP client
+httpx>=0.27
+
+# Utilities
+pydantic>=2.8
+pydantic-settings>=2.3
+tqdm>=4.66
