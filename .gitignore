@@ -34,10 +34,12 @@ Thumbs.db
 outputs/
 temp/
 uploads/
+videos/
 *.mp4
 *.wav
 *.jpg
 *.png
+*.db
 
 # Test artifacts
 .pytest_cache/
