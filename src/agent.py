@@ -73,44 +73,101 @@ def process_video(video_path: str, work_dir: str) -> VideoContext:
     )
 
 
+def _question_intent(question: str) -> Dict[str, bool]:
+    """Detect what the question is asking about to guide evidence retrieval."""
+    q = question.lower()
+    # Dialogue/audio intent keywords
+    audio_kw = {"say", "said", "speak", "spoke", "hear", "heard", "tell", "told",
+                "mention", "talk", "voice", "dialogue", "conversation", "audio",
+                "word", "orateur", "dit", "parle"}
+    # Visual text intent keywords
+    text_kw = {"text", "read", "written", "write", "screen", "display", "sign",
+               "title", "subtitle", "caption", "label", "letter", "word", "texte"}
+    # Scene/visual intent keywords
+    scene_kw = {"see", "seen", "show", "shown", "look", "scene", "happen",
+                "appear", "visible", "watch", "action", "doing", "object",
+                "person", "color", "background", "image", "video"}
+    words = set(q.split())
+    return {
+        "audio": bool(words & audio_kw),
+        "text": bool(words & text_kw),
+        "scene": bool(words & scene_kw),
+    }
+
+
 def find_relevant_context(ctx: VideoContext, question: str) -> Dict[str, Any]:
     """
-    Simple relevance matching: keyword overlap between question and
-    transcript/OCR/scene text. Returns relevant segments with timestamps.
+    Intent-aware relevance matching. Detects what the question asks about
+    (dialogue, on-screen text, scenes) and returns all matching evidence.
+    Falls back to keyword overlap when intent doesn't match.
     """
     q_lower = question.lower()
+    q_words = [w for w in q_lower.split() if len(w) > 2]
+    intent = _question_intent(question)
     relevant = {"transcript": [], "ocr": [], "scenes": []}
 
-    # Transcript matches
+    # --- Transcript / dialogue ---
     for seg in ctx.transcript_segments:
         text = seg.get("text", "").lower()
-        if any(w in text for w in q_lower.split() if len(w) > 3):
+        # Include if question is about dialogue OR keyword overlap
+        keyword_hit = any(w in text for w in q_words)
+        if intent["audio"] or keyword_hit:
             relevant["transcript"].append({
                 "text": seg.get("text"),
                 "start": seg.get("start"),
                 "end": seg.get("end"),
             })
 
-    # OCR matches
+    # --- OCR / on-screen text ---
+    seen_ocr_texts = set()
     for ocr in ctx.ocr_results:
         for block in ocr.get("output", {}).get("blocks", []):
-            text = block.get("text", "").lower()
-            if any(w in text for w in q_lower.split() if len(w) > 3):
+            text = block.get("text", "").strip()
+            if not text or text.lower() in ("", "ocr unavailable (api error)"):
+                continue
+            # Deduplicate identical OCR across frames
+            text_key = text.lower()
+            if text_key in seen_ocr_texts:
+                continue
+            seen_ocr_texts.add(text_key)
+            keyword_hit = any(w in text.lower() for w in q_words)
+            if intent["text"] or keyword_hit:
                 relevant["ocr"].append({
-                    "text": block.get("text"),
+                    "text": text,
                     "timestamp": ocr.get("timestamp"),
                     "frame_index": ocr.get("frame_index"),
                 })
 
-    # Scene matches
+    # --- Scene descriptions ---
     for scene in ctx.scene_descriptions:
-        desc = scene.get("output", {}).get("description", "").lower()
-        if any(w in desc for w in q_lower.split() if len(w) > 3):
+        desc = scene.get("output", {}).get("description", "")
+        if not desc or desc.lower().startswith("frame processed"):
+            continue
+        keyword_hit = any(w in desc.lower() for w in q_words)
+        if intent["scene"] or keyword_hit:
             relevant["scenes"].append({
-                "description": scene.get("output", {}).get("description"),
+                "description": desc,
                 "timestamp": scene.get("timestamp"),
                 "frame_index": scene.get("frame_index"),
             })
+
+    # Fallback: if nothing matched via intent, try loose keyword matching
+    if not any(relevant.values()):
+        for seg in ctx.transcript_segments:
+            text = seg.get("text", "")
+            if text.strip():
+                relevant["transcript"].append({
+                    "text": text, "start": seg.get("start"), "end": seg.get("end"),
+                })
+        for ocr in ctx.ocr_results:
+            for block in ocr.get("output", {}).get("blocks", []):
+                text = block.get("text", "").strip()
+                if text and text.lower() != "ocr unavailable (api error)":
+                    relevant["ocr"].append({
+                        "text": text,
+                        "timestamp": ocr.get("timestamp"),
+                        "frame_index": ocr.get("frame_index"),
+                    })
 
     return relevant
 
@@ -130,8 +187,10 @@ def generate_answer(ctx: VideoContext, question: str, target_lang: str) -> Dict[
 
     # Dialogue evidence
     for t in relevant["transcript"]:
-        answer_parts.append(f"[Dialogue @ {t['start']:.1f}-{t['end']:.1f}s] {t['text']}")
-        timestamps["dialogue"].append({"start": t["start"], "end": t["end"], "text": t["text"]})
+        start = t.get("start") or 0.0
+        end = t.get("end") or 0.0
+        answer_parts.append(f"[Dialogue @ {start:.1f}-{end:.1f}s] {t['text']}")
+        timestamps["dialogue"].append({"start": start, "end": end, "text": t["text"]})
         evidence.append({"type": "stt", "input_ref": ctx.video_path, "output": t})
 
     # OCR evidence
