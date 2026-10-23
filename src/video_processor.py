@@ -5,14 +5,30 @@ from typing import List, Dict, Any, Tuple
 import ffmpeg
 
 
+def has_audio_stream(video_path: str) -> bool:
+    """Check if video has an audio stream."""
+    probe = ffmpeg.probe(video_path)
+    return any(s.get("codec_type") == "audio" for s in probe.get("streams", []))
+
+
 def extract_audio(video_path: str, output_audio: str, sample_rate: int = 16000) -> str:
-    """Extract mono audio at 16kHz for STT."""
-    (
-        ffmpeg.input(video_path)
-        .output(output_audio, ac=1, ar=sample_rate, format="wav")
-        .overwrite_output()
-        .run(capture_stdout=True, capture_stderr=True)
-    )
+    """Extract mono audio at 16kHz for STT. Creates silent audio if no audio stream."""
+    if has_audio_stream(video_path):
+        (
+            ffmpeg.input(video_path)
+            .output(output_audio, ac=1, ar=sample_rate, format="wav")
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+    else:
+        # Create silent audio track (5s minimum) so STT doesn't crash
+        duration = get_video_duration(video_path)
+        (
+            ffmpeg.input(f"anullsrc=r={sample_rate}:cl=mono", f="lavfi", t=duration)
+            .output(output_audio, ac=1, ar=sample_rate, format="wav")
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
     return output_audio
 
 

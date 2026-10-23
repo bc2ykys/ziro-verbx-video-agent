@@ -41,6 +41,9 @@ def process_video(video_path: str, work_dir: str) -> VideoContext:
     # 2. STT on audio
     stt_result = verbx.stt(audio_path)
     transcript_segments = stt_result.get("segments", [])
+    # If no segments found, note it (guardrail: state when something cannot be heard)
+    if not transcript_segments:
+        transcript_segments = []  # Explicitly empty — agent will report "cannot hear"
 
     # 3. OCR on each frame
     ocr_results = []
