@@ -123,7 +123,7 @@ def find_relevant_context(ctx: VideoContext, question: str) -> Dict[str, Any]:
     for ocr in ctx.ocr_results:
         for block in ocr.get("output", {}).get("blocks", []):
             text = block.get("text", "").strip()
-            if not text or text.lower() in ("", "ocr unavailable (api error)"):
+            if not text or text.lower() in ("", "ocr unavailable (api error)") or text.lower().startswith("i'm sorry"):
                 continue
             # Deduplicate identical OCR across frames
             text_key = text.lower()
