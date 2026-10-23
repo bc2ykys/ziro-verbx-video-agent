@@ -95,6 +95,13 @@ class VerbXClient:
             raise
 
     # --- OCR (SaaS Playground) ---
+    def _is_ocr_refusal(self, text: str) -> bool:
+        """Check if OCR result is a model refusal rather than actual text."""
+        t = text.lower().replace("\u2019", "'").replace("\u2018", "'")
+        refusal_phrases = ["i'm sorry", "i can't extract", "cannot extract",
+                          "no text", "unable to", "ocr unavailable"]
+        return any(p in t for p in refusal_phrases)
+
     def ocr(self, image_path: str, language: str = "en") -> Dict[str, Any]:
         """OCR on a single frame/image via SaaS playground."""
         with open(image_path, "rb") as f:
@@ -108,11 +115,15 @@ class VerbXClient:
         }
         try:
             result = self._post_saas("/saas/playground/ocr", payload)
+            extracted = result.get("extracted_text", "")
+            # Filter out model refusals — treat as "no text found"
+            if self._is_ocr_refusal(extracted):
+                return {"output": {"blocks": []}}
             return {
                 "output": {
                     "blocks": [
                         {
-                            "text": result.get("extracted_text", ""),
+                            "text": extracted,
                             "translated": result.get("translated_text", ""),
                             "box": b.get("box", []),
                             "confidence": b.get("confidence", 0.0),
